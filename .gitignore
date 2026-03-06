@@ -1,0 +1,7 @@
+# .gitignore
+best_model.pth
+__pycache__/
+*.pyc
+.env
+*.pth
+*.pt
