@@ -78,11 +78,7 @@ cd sentinel-forgery-detection
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Download model weights
-# Get best_model.pth from the link below and place it in the project root
-# 👉 [Download best_model.pth](YOUR_GOOGLE_DRIVE_LINK_HERE)
-
-# 4. Run the app
+# 3. Run the app
 streamlit run app.py
 ```
 
