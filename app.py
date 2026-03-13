@@ -293,150 +293,98 @@
 #         return None, None, False
 
 
+# def visual_ai_detection(image_pil):
+#     """
+#     Pure numpy/cv2 AI image detector — no torch, never crashes.
+#     Calibrated on 3 AI image styles: vivid portrait, B&W CGI, soft photorealistic.
+#     Returns score 0.0-1.0 where 1.0 = definitely AI generated.
+#     """
+#     try:
+#         img_np    = np.array(image_pil.convert('RGB')).astype(np.float32)
+#         img_gray  = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+#         img_hsv   = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
+#         mean_sat  = float(np.mean(img_hsv[:, :, 1]))
+#         is_monochrome = mean_sat < 50
+
+#         # HF ratio via DCT — AI generators produce low high-freq content
+#         # Calibrated: AI 0.008-0.035, real photos 0.050-0.120
+#         from scipy.fftpack import dct as _dct
+#         _g256    = cv2.resize(img_gray, (256, 256)).astype(np.float32)
+#         _dct2d   = _dct(_dct(_g256, axis=0, norm='ortho'), axis=1, norm='ortho')
+#         _da      = np.abs(_dct2d)
+#         hf_ratio = float(_da[64:, 64:].mean() / (_da[:32, :32].mean() + 1e-8))
+#         hf_score = max(0.0, min(1.0, 1.0 - (hf_ratio - 0.008) / 0.052))
+
+#         # Bilateral residual — measures grain/noise level
+#         _bilateral = cv2.bilateralFilter(img_gray, 9, 75, 75)
+#         bilateral_residual = float(np.mean(
+#             np.abs(img_gray - _bilateral.astype(np.float32))
+#         ))
+
+#         if is_monochrome:
+#             # B&W / CGI / metallic AI art path
+#             bright_pct    = float(np.mean(img_gray > 240))
+#             dark_pct      = float(np.mean(img_gray < 15))
+#             extreme_score = max(0.0, min(1.0, (bright_pct + dark_pct - 0.05) / 0.25))
+#             _r = img_np[:, :, 0].flatten()[:8000]
+#             _g = img_np[:, :, 1].flatten()[:8000]
+#             _b = img_np[:, :, 2].flatten()[:8000]
+#             rg_corr    = float(np.corrcoef(_r, _g)[0, 1])
+#             rb_corr    = float(np.corrcoef(_r, _b)[0, 1])
+#             mono_score = max(0.0, min(1.0, (max(rg_corr, rb_corr) - 0.90) / 0.08))
+#             bilateral_s = max(0.0, min(1.0, 1.0 - (bilateral_residual - 1.0) / 5.0))
+#             return (0.40 * mono_score + 0.35 * extreme_score +
+#                     0.15 * hf_score   + 0.10 * bilateral_s)
+#         else:
+#             # Color AI path — low HF, oversaturated, smooth
+#             sat_score   = max(0.0, min(1.0, (mean_sat - 100.0) / 100.0))
+#             bilateral_s = max(0.0, min(1.0, 1.0 - (bilateral_residual - 1.0) / 5.0))
+#             return 0.55 * hf_score + 0.30 * sat_score + 0.15 * bilateral_s
+#     except Exception:
+#         return 0.5
+
+
 # def clip_ai_detection(image_pil, cm, cp):
-#     """
-#     REDESIGNED AI detection using proper CLIP cosine similarity.
-
-#     Root cause of old failure: softmax over mixed real+AI prompts meant the
-#     model was finding the best single prompt match, not doing binary classification.
-
-#     New approach — two independent signals averaged:
-
-#     Signal A (CLIP semantic): Extract image embedding, compare cosine similarity
-#     against a "real photo" centroid and an "AI image" centroid (each averaged
-#     over multiple prompts). This is the correct zero-shot classification method.
-
-#     Signal B (visual heuristics): AI images have characteristic signatures —
-#     unnaturally smooth gradients, absence of sensor noise, perfect symmetry,
-#     overly saturated colors. Measured purely with numpy/cv2.
-#     """
+#     """CLIP-only semantic detector. Returns 0.5 on any failure."""
 #     try:
 #         import torch.nn.functional as F_
 
-#         # ── Signal A: CLIP cosine similarity ──────────────────────────────────
-#         # Prompts specifically tuned for CLIP ViT-B/32 vocabulary
 #         real_prompts = [
-#             "a photograph",
-#             "a photo taken by a camera",
-#             "a real life photo",
-#             "DSLR photo",
-#             "phone camera photo",
-#             "candid photograph",
-#             "photojournalism",
-#             "documentary photo",
+#             "a photograph", "a photo taken by a camera", "a real life photo",
+#             "DSLR photo", "phone camera photo", "candid photograph",
+#             "photojournalism", "documentary photo",
 #         ]
 #         ai_prompts = [
-#             "digital art",
-#             "AI generated art",
-#             "concept art",
-#             "highly detailed digital painting",
-#             "artstation trending",
-#             "midjourney",
-#             "stable diffusion",
-#             "CGI render",
-#             "hyper realistic digital art",
-#             "synthetic image",
+#             "digital art", "AI generated art", "concept art",
+#             "highly detailed digital painting", "artstation trending",
+#             "midjourney", "stable diffusion", "CGI render",
+#             "hyper realistic digital art", "synthetic image",
+#             "cinematic AI photo", "AI generated portrait",
+#             "perfect lighting studio photography",
+#             "3D render unreal engine", "photorealistic render",
 #         ]
 
-#         # Get image embedding
 #         img_inputs = cp(images=image_pil, return_tensors="pt")
 #         with torch.no_grad():
-#             img_feat = F_.normalize(cm.get_image_features(**img_inputs), dim=-1)  # (1, 512)
+#             img_feat = F_.normalize(cm.get_image_features(**img_inputs), dim=-1)
 
-#         # Get text embeddings for each prompt
-#         def get_text_centroid(prompts):
+#         def get_centroid(prompts):
 #             enc = cp(text=prompts, return_tensors="pt", padding=True)
 #             with torch.no_grad():
-#                 tf = F_.normalize(cm.get_text_features(**enc), dim=-1)  # (N, 512)
-#             return tf.mean(dim=0, keepdim=True)  # (1, 512) centroid
+#                 tf = F_.normalize(cm.get_text_features(**enc), dim=-1)
+#             return tf.mean(dim=0, keepdim=True)
 
-#         real_centroid = get_text_centroid(real_prompts)
-#         ai_centroid   = get_text_centroid(ai_prompts)
+#         real_c = get_centroid(real_prompts)
+#         ai_c   = get_centroid(ai_prompts)
 
-#         # Cosine similarity: higher = more similar
-#         sim_real = torch.mm(img_feat, real_centroid.T).item()  # scalar
-#         sim_ai   = torch.mm(img_feat, ai_centroid.T).item()    # scalar
+#         sim_real = torch.mm(img_feat, real_c.T).item()
+#         sim_ai   = torch.mm(img_feat, ai_c.T).item()
+#         temp     = 0.07
+#         probs    = torch.softmax(torch.tensor([sim_real / temp, sim_ai / temp]), dim=0)
+#         return float(probs[1].item()), True
 
-#         # Convert to probability: how much more similar to AI than real?
-#         # Use softmax over the two similarities (temperature scaled)
-#         temp = 0.07  # CLIP's default temperature
-#         sims = torch.tensor([sim_real / temp, sim_ai / temp])
-#         probs = torch.softmax(sims, dim=0)
-#         clip_signal = float(probs[1].item())  # P(AI)
-
-#         # ── Signal B: Visual heuristics (numpy) ───────────────────────────────
-#         img_np  = np.array(image_pil.convert('RGB')).astype(np.float32)
-#         img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-
-#         # B1: Noise level — real camera sensor noise vs AI smoothness
-#         blurred    = cv2.GaussianBlur(img_gray, (5, 5), 0)
-#         noise      = img_gray.astype(np.float32) - blurred.astype(np.float32)
-#         noise_std  = float(np.std(noise))
-#         # Calibrated: real DSLR/phone: 3-8. AI image: 1-3. Crossover ~3.5
-#         noise_score = max(0.0, min(1.0, 1.0 - (noise_std - 1.0) / 4.0))
-
-#         # B2: Oversaturation — AI art is characteristically vivid
-#         img_hsv  = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
-#         mean_sat = float(np.mean(img_hsv[:, :, 1]))
-#         # Real photos: 60-120 typical. AI (MidJourney/SD): 140-200
-#         # Score linearly: 120 → 0.0, 200 → 1.0
-#         sat_score = max(0.0, min(1.0, (mean_sat - 120.0) / 80.0))
-
-#         # B3: Edge sparsity — AI images have smooth, clean edges (less Canny hits)
-#         edges      = cv2.Canny(img_gray, 50, 150)
-#         edge_pct   = float(np.mean(edges > 0))
-#         # Real photos: 0.07-0.20. AI: 0.01-0.06
-#         # Score: 0.06 → 1.0, 0.10 → 0.0
-#         edge_score = max(0.0, min(1.0, 1.0 - (edge_pct - 0.01) / 0.09))
-
-#         # B4: Texture flatness — AI images lack micro-texture/grain
-#         laplacian     = cv2.Laplacian(img_gray.astype(np.float32), cv2.CV_32F)
-#         lap_var       = float(np.var(laplacian))
-#         # Real: 400-2000+. AI painted-smooth: 50-300
-#         # Score: 300 → 1.0, 800 → 0.0
-#         texture_score = max(0.0, min(1.0, 1.0 - (lap_var - 50.0) / 750.0))
-
-#         # B5: Sky/background gradient smoothness — AI has unnatural smooth gradients
-#         # Sample top 25% of image (typically sky/background)
-#         top_quarter   = img_gray[:img_gray.shape[0]//4, :]
-#         grad_x        = np.abs(np.diff(top_quarter.astype(np.float32), axis=1))
-#         grad_y        = np.abs(np.diff(top_quarter.astype(np.float32), axis=0))
-#         mean_grad     = float(np.mean(grad_x) + np.mean(grad_y)) / 2.0
-#         # Real sky: mean_grad ~2-6. AI gradient sky: ~0.5-2
-#         gradient_score = max(0.0, min(1.0, 1.0 - (mean_grad - 0.5) / 5.0))
-
-#         visual_signal = (0.25*noise_score + 0.30*sat_score +
-#                          0.20*edge_score  + 0.15*texture_score + 0.10*gradient_score)
-
-#         # ── Combine: CLIP semantic + visual heuristics ──────────────────────
-#         # Visual heuristics are highly reliable for AI images:
-#         # - sat=177 (normal real: 80-120) → AI
-#         # - edge_pct=0.018 (normal real: 0.08+) → AI
-#         # - lap_var=78 (normal real: 400+) → AI
-#         # When visual signal is strong, give it more weight
-#         if visual_signal > 0.70:
-#             # Strong visual evidence of AI — equal weight
-#             final_score = 0.50 * clip_signal + 0.50 * visual_signal
-#         elif visual_signal > 0.50:
-#             # Moderate visual evidence
-#             final_score = 0.60 * clip_signal + 0.40 * visual_signal
-#         else:
-#             # Weak visual evidence — CLIP leads
-#             final_score = 0.70 * clip_signal + 0.30 * visual_signal
-
-#         return float(min(1.0, max(0.0, final_score))), True
-
-#     except Exception as e:
-#         # Fallback: visual heuristics only
-#         try:
-#             img_np   = np.array(image_pil.convert('RGB')).astype(np.float32)
-#             img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-#             blurred  = cv2.GaussianBlur(img_gray, (5, 5), 0)
-#             noise_std = float(np.std(img_gray - blurred))
-#             fallback = max(0.0, min(1.0, 1.0 - (noise_std - 0.5) / 6.0))
-#             return fallback, True
-#         except Exception:
-#             return 0.5, False
+#     except Exception:
+#         return 0.5, False
 
 
 # def detect_ai_caption(caption, cm, cp, clip_ok):
@@ -785,15 +733,19 @@
 #     if clip_ok:
 #         # clip_s already contains 50% visual signal (from redesigned clip_ai_detection)
 #         # So clip_s > 0.50 with low SBI = very likely AI image
-#         clip_dominant = clip_s > 0.55 and sbi < 0.45
-#         sbi_dominant  = sbi > 0.55 and clip_s < 0.50
+#         clip_dominant = clip_s > 0.48 and sbi < 0.45
+#         sbi_dominant  = sbi > 0.55 and clip_s < 0.45
 
 #         if clip_dominant:
-#             # AI image pattern: CLIP+visual leads strongly
+#             # AI image pattern: CLIP+visual leads
 #             ai = 0.80 * clip_s + 0.05 * sbi + 0.15 * dct_ai_c
 #         elif sbi_dominant:
-#             # Splice pattern: SBI leads
+#             # Splice/copy-paste pattern: SBI leads
 #             ai = 0.25 * clip_s + 0.55 * sbi + 0.20 * dct_ai_c
+#         elif sbi < 0.25:
+#             # SBI sees nothing suspicious — likely AI or real (not a splice)
+#             # Let CLIP lead with higher weight
+#             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
 #         else:
 #             # General case
 #             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
@@ -917,7 +869,7 @@
 #     st.caption("DETECTION SENSITIVITY")
 #     threshold = st.slider(
 #         "Fake score threshold",
-#         min_value=0.10, max_value=0.90, value=0.35, step=0.05,
+#         min_value=0.10, max_value=0.90, value=0.30, step=0.05,
 #         help="Images scoring above this are flagged as fake. Lower = more sensitive."
 #     )
 #     st.caption(f"Threshold: {threshold:.2f}  ·  {'Sensitive' if threshold < 0.35 else 'Balanced' if threshold < 0.60 else 'Conservative'}")
@@ -980,8 +932,21 @@
 
 #         with st.spinner("L1 — SBI splice detection..."):
 #             sbi_score, heatmap_np, image_np = run_sbi_inference(image_pil, caption, sbi_model, tokenizer, device)
-#         with st.spinner("L2 — CLIP AI detection..."):
-#             clip_score, _ = (clip_ai_detection(image_pil, clip_model, clip_processor) if clip_ok else (0.5, False))
+#         with st.spinner("L2 — Visual AI detection..."):
+#             visual_score = visual_ai_detection(image_pil)
+#         with st.spinner("L2b — CLIP semantic detection..."):
+#             clip_raw, clip_fired = (clip_ai_detection(image_pil, clip_model, clip_processor) if clip_ok else (0.5, False))
+#             # Combine: visual heuristics are reliable, CLIP adds semantic signal
+#             if clip_fired and clip_raw != 0.5:
+#                 if visual_score > 0.70:
+#                     clip_score = 0.50 * clip_raw + 0.50 * visual_score
+#                 elif visual_score > 0.50:
+#                     clip_score = 0.60 * clip_raw + 0.40 * visual_score
+#                 else:
+#                     clip_score = 0.70 * clip_raw + 0.30 * visual_score
+#             else:
+#                 # CLIP failed — use visual heuristics directly as clip_score
+#                 clip_score = visual_score
 #         with st.spinner("L3 — DCT frequency..."):
 #             dct_ai, dct_ps, dct_d = dct_frequency_analysis(image_pil)
 #         with st.spinner("L4 — ELA Photoshop..."):
@@ -1397,7 +1362,9 @@ def get_theme_css(light: bool) -> str:
 
 * {{ box-sizing: border-box; }}
 html, body, .stApp {{ background: {bg} !important; color: {text} !important; font-family: 'DM Sans', sans-serif !important; }}
-#MainMenu, footer, header {{ visibility: hidden; }}
+#MainMenu, footer {{ visibility: hidden; }}
+header {{ visibility: hidden; }}
+[data-testid="collapsedControl"] {{ visibility: visible !important; display: block !important; }}
 .block-container {{ padding: 1.5rem 2rem 3rem !important; max-width: 1400px !important; }}
 [data-testid="stSidebar"] {{ background: {sb_bg} !important; border-right: 1px solid {border} !important; }}
 [data-testid="stSidebar"] section > div {{ background: {sb_bg} !important; }}
@@ -1575,98 +1542,21 @@ def load_clip_model():
         return None, None, False
 
 
-def clip_ai_detection(image_pil, cm, cp):
+def visual_ai_detection(image_pil):
     """
-    REDESIGNED AI detection using proper CLIP cosine similarity.
-
-    Root cause of old failure: softmax over mixed real+AI prompts meant the
-    model was finding the best single prompt match, not doing binary classification.
-
-    New approach — two independent signals averaged:
-
-    Signal A (CLIP semantic): Extract image embedding, compare cosine similarity
-    against a "real photo" centroid and an "AI image" centroid (each averaged
-    over multiple prompts). This is the correct zero-shot classification method.
-
-    Signal B (visual heuristics): AI images have characteristic signatures —
-    unnaturally smooth gradients, absence of sensor noise, perfect symmetry,
-    overly saturated colors. Measured purely with numpy/cv2.
+    Pure numpy/cv2 AI image detector — no torch, never crashes.
+    Calibrated on 3 AI image styles: vivid portrait, B&W CGI, soft photorealistic.
+    Returns score 0.0-1.0 where 1.0 = definitely AI generated.
     """
     try:
-        import torch.nn.functional as F_
+        img_np    = np.array(image_pil.convert('RGB')).astype(np.float32)
+        img_gray  = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        img_hsv   = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
+        mean_sat  = float(np.mean(img_hsv[:, :, 1]))
+        is_monochrome = mean_sat < 50
 
-        # ── Signal A: CLIP cosine similarity ──────────────────────────────────
-        # Prompts specifically tuned for CLIP ViT-B/32 vocabulary
-        real_prompts = [
-            "a photograph",
-            "a photo taken by a camera",
-            "a real life photo",
-            "DSLR photo",
-            "phone camera photo",
-            "candid photograph",
-            "photojournalism",
-            "documentary photo",
-        ]
-        ai_prompts = [
-            "digital art",
-            "AI generated art",
-            "concept art",
-            "highly detailed digital painting",
-            "artstation trending",
-            "midjourney",
-            "stable diffusion",
-            "CGI render",
-            "hyper realistic digital art",
-            "synthetic image",
-            "cinematic AI photo",
-            "AI generated portrait",
-            "perfect lighting studio photography",
-            "3D render unreal engine",
-            "photorealistic render",
-        ]
-
-        # Get image embedding
-        img_inputs = cp(images=image_pil, return_tensors="pt")
-        with torch.no_grad():
-            img_feat = F_.normalize(cm.get_image_features(**img_inputs), dim=-1)  # (1, 512)
-
-        # Get text embeddings for each prompt
-        def get_text_centroid(prompts):
-            enc = cp(text=prompts, return_tensors="pt", padding=True)
-            with torch.no_grad():
-                tf = F_.normalize(cm.get_text_features(**enc), dim=-1)  # (N, 512)
-            return tf.mean(dim=0, keepdim=True)  # (1, 512) centroid
-
-        real_centroid = get_text_centroid(real_prompts)
-        ai_centroid   = get_text_centroid(ai_prompts)
-
-        # Cosine similarity: higher = more similar
-        sim_real = torch.mm(img_feat, real_centroid.T).item()  # scalar
-        sim_ai   = torch.mm(img_feat, ai_centroid.T).item()    # scalar
-
-        # Convert to probability: how much more similar to AI than real?
-        # Use softmax over the two similarities (temperature scaled)
-        temp = 0.07  # CLIP's default temperature
-        sims = torch.tensor([sim_real / temp, sim_ai / temp])
-        probs = torch.softmax(sims, dim=0)
-        clip_signal = float(probs[1].item())  # P(AI)
-
-        # ── Signal B: Visual heuristics (numpy) ───────────────────────────────
-        img_np  = np.array(image_pil.convert('RGB')).astype(np.float32)
-        img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-
-        # ── Visual Heuristics: style-aware, calibrated on real AI images ──────
-        # Signals were calibrated using: vivid portrait AI, B&W metallic CGI,
-        # and soft warm photorealistic AI — three very different AI styles.
-
-        # Saturation (color metadata)
-        img_hsv  = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
-        mean_sat = float(np.mean(img_hsv[:, :, 1]))
-        is_monochrome = mean_sat < 50  # B&W / desaturated AI art
-
-        # HF ratio (DCT-based) — most reliable cross-style signal
-        # AI generators produce smooth images with low HF content
-        # Calibrated: AI 0.008-0.035, real photos 0.040-0.120
+        # HF ratio via DCT — AI generators produce low high-freq content
+        # Calibrated: AI 0.008-0.035, real photos 0.050-0.120
         from scipy.fftpack import dct as _dct
         _g256    = cv2.resize(img_gray, (256, 256)).astype(np.float32)
         _dct2d   = _dct(_dct(_g256, axis=0, norm='ortho'), axis=1, norm='ortho')
@@ -1674,19 +1564,17 @@ def clip_ai_detection(image_pil, cm, cp):
         hf_ratio = float(_da[64:, 64:].mean() / (_da[:32, :32].mean() + 1e-8))
         hf_score = max(0.0, min(1.0, 1.0 - (hf_ratio - 0.008) / 0.052))
 
-        # Bilateral filter residual — measures how much grain/noise real photos have
+        # Bilateral residual — measures grain/noise level
         _bilateral = cv2.bilateralFilter(img_gray, 9, 75, 75)
         bilateral_residual = float(np.mean(
-            np.abs(img_gray.astype(np.float32) - _bilateral.astype(np.float32))
+            np.abs(img_gray - _bilateral.astype(np.float32))
         ))
 
         if is_monochrome:
-            # ── Monochrome/B&W AI path (CGI renders, dark art, chrome) ────────
-            # These images have: extreme contrast, metallic highlights, pure black BG
+            # B&W / CGI / metallic AI art path
             bright_pct    = float(np.mean(img_gray > 240))
             dark_pct      = float(np.mean(img_gray < 15))
             extreme_score = max(0.0, min(1.0, (bright_pct + dark_pct - 0.05) / 0.25))
-            # R/G/B channel correlation: monochrome AI = near-perfect correlation
             _r = img_np[:, :, 0].flatten()[:8000]
             _g = img_np[:, :, 1].flatten()[:8000]
             _b = img_np[:, :, 2].flatten()[:8000]
@@ -1694,36 +1582,58 @@ def clip_ai_detection(image_pil, cm, cp):
             rb_corr    = float(np.corrcoef(_r, _b)[0, 1])
             mono_score = max(0.0, min(1.0, (max(rg_corr, rb_corr) - 0.90) / 0.08))
             bilateral_s = max(0.0, min(1.0, 1.0 - (bilateral_residual - 1.0) / 5.0))
-            visual_signal = (0.40 * mono_score + 0.35 * extreme_score +
-                             0.15 * hf_score   + 0.10 * bilateral_s)
+            return (0.40 * mono_score + 0.35 * extreme_score +
+                    0.15 * hf_score   + 0.10 * bilateral_s)
         else:
-            # ── Color AI path (portraits, landscapes, photorealistic) ──────────
-            # Signals: low HF (smooth), oversaturated, low bilateral residual
+            # Color AI path — low HF, oversaturated, smooth
             sat_score   = max(0.0, min(1.0, (mean_sat - 100.0) / 100.0))
             bilateral_s = max(0.0, min(1.0, 1.0 - (bilateral_residual - 1.0) / 5.0))
-            visual_signal = 0.55 * hf_score + 0.30 * sat_score + 0.15 * bilateral_s
+            return 0.55 * hf_score + 0.30 * sat_score + 0.15 * bilateral_s
+    except Exception:
+        return 0.5
 
-        # ── Combine CLIP semantic + visual heuristics ───────────────────────
-        if visual_signal > 0.70:
-            final_score = 0.50 * clip_signal + 0.50 * visual_signal
-        elif visual_signal > 0.50:
-            final_score = 0.60 * clip_signal + 0.40 * visual_signal
-        else:
-            final_score = 0.70 * clip_signal + 0.30 * visual_signal
 
-        return float(min(1.0, max(0.0, final_score))), True
+def clip_ai_detection(image_pil, cm, cp):
+    """CLIP-only semantic detector. Returns 0.5 on any failure."""
+    try:
+        import torch.nn.functional as F_
 
-    except Exception as e:
-        # Fallback: visual heuristics only
-        try:
-            img_np   = np.array(image_pil.convert('RGB')).astype(np.float32)
-            img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-            blurred  = cv2.GaussianBlur(img_gray, (5, 5), 0)
-            noise_std = float(np.std(img_gray - blurred))
-            fallback = max(0.0, min(1.0, 1.0 - (noise_std - 0.5) / 6.0))
-            return fallback, True
-        except Exception:
-            return 0.5, False
+        real_prompts = [
+            "a photograph", "a photo taken by a camera", "a real life photo",
+            "DSLR photo", "phone camera photo", "candid photograph",
+            "photojournalism", "documentary photo",
+        ]
+        ai_prompts = [
+            "digital art", "AI generated art", "concept art",
+            "highly detailed digital painting", "artstation trending",
+            "midjourney", "stable diffusion", "CGI render",
+            "hyper realistic digital art", "synthetic image",
+            "cinematic AI photo", "AI generated portrait",
+            "perfect lighting studio photography",
+            "3D render unreal engine", "photorealistic render",
+        ]
+
+        img_inputs = cp(images=image_pil, return_tensors="pt")
+        with torch.no_grad():
+            img_feat = F_.normalize(cm.get_image_features(**img_inputs), dim=-1)
+
+        def get_centroid(prompts):
+            enc = cp(text=prompts, return_tensors="pt", padding=True)
+            with torch.no_grad():
+                tf = F_.normalize(cm.get_text_features(**enc), dim=-1)
+            return tf.mean(dim=0, keepdim=True)
+
+        real_c = get_centroid(real_prompts)
+        ai_c   = get_centroid(ai_prompts)
+
+        sim_real = torch.mm(img_feat, real_c.T).item()
+        sim_ai   = torch.mm(img_feat, ai_c.T).item()
+        temp     = 0.07
+        probs    = torch.softmax(torch.tensor([sim_real / temp, sim_ai / temp]), dim=0)
+        return float(probs[1].item()), True
+
+    except Exception:
+        return 0.5, False
 
 
 def detect_ai_caption(caption, cm, cp, clip_ok):
@@ -2271,8 +2181,21 @@ with col_r:
 
         with st.spinner("L1 — SBI splice detection..."):
             sbi_score, heatmap_np, image_np = run_sbi_inference(image_pil, caption, sbi_model, tokenizer, device)
-        with st.spinner("L2 — CLIP AI detection..."):
-            clip_score, _ = (clip_ai_detection(image_pil, clip_model, clip_processor) if clip_ok else (0.5, False))
+        with st.spinner("L2 — Visual AI detection..."):
+            visual_score = visual_ai_detection(image_pil)
+        with st.spinner("L2b — CLIP semantic detection..."):
+            clip_raw, clip_fired = (clip_ai_detection(image_pil, clip_model, clip_processor) if clip_ok else (0.5, False))
+            # Combine: visual heuristics are reliable, CLIP adds semantic signal
+            if clip_fired and clip_raw != 0.5:
+                if visual_score > 0.70:
+                    clip_score = 0.50 * clip_raw + 0.50 * visual_score
+                elif visual_score > 0.50:
+                    clip_score = 0.60 * clip_raw + 0.40 * visual_score
+                else:
+                    clip_score = 0.70 * clip_raw + 0.30 * visual_score
+            else:
+                # CLIP failed — use visual heuristics directly as clip_score
+                clip_score = visual_score
         with st.spinner("L3 — DCT frequency..."):
             dct_ai, dct_ps, dct_d = dct_frequency_analysis(image_pil)
         with st.spinner("L4 — ELA Photoshop..."):
