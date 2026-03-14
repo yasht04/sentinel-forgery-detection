@@ -1,13 +1,3 @@
-# # =============================================================
-# # app.py — SENTINEL v4.0
-# # Changes from v3:
-# #   1. Simplified UI with dark/light mode toggle
-# #   2. Per-region fake highlighting (fake bg, real fg separated)
-# #   3. AI caption detection
-# #   4. Photoshop + AI forgery detection (separate verdicts)
-# # Run: streamlit run app.py
-# # =============================================================
-
 # import streamlit as st
 # import torch
 # import torch.nn.functional as F
@@ -30,7 +20,7 @@
 #     page_title="SENTINEL — Forgery Detection",
 #     page_icon="🛡️",
 #     layout="wide",
-#     initial_sidebar_state="expanded"
+#     initial_sidebar_state="collapsed"
 # )
 
 # # =============================================================
@@ -115,7 +105,17 @@
 
 # * {{ box-sizing: border-box; }}
 # html, body, .stApp {{ background: {bg} !important; color: {text} !important; font-family: 'DM Sans', sans-serif !important; }}
-# #MainMenu, footer, header {{ visibility: hidden; }}
+# #MainMenu, footer {{ visibility: hidden; }}
+# header {{ visibility: hidden; }}
+# [data-testid="collapsedControl"],
+# [data-testid="collapsedControl"] button,
+# section[data-testid="stSidebarCollapsedControl"] {{
+#     visibility: visible !important;
+#     display: flex !important;
+#     opacity: 1 !important;
+#     pointer-events: auto !important;
+#     z-index: 999999 !important;
+# }}
 # .block-container {{ padding: 1.5rem 2rem 3rem !important; max-width: 1400px !important; }}
 # [data-testid="stSidebar"] {{ background: {sb_bg} !important; border-right: 1px solid {border} !important; }}
 # [data-testid="stSidebar"] section > div {{ background: {sb_bg} !important; }}
@@ -823,69 +823,13 @@
 
 
 # # =============================================================
-# # SIDEBAR
+# # CONTROLS (moved inline — sidebar toggle was unreliable)
 # # =============================================================
-# with st.sidebar:
-#     # ── Theme: two plain st.buttons — always visible, no CSS deps ──
-#     is_light = (st.session_state.get('theme', 'dark') == 'light')
-#     st.markdown("**🎨 Theme**")
-#     t_col1, t_col2 = st.columns(2)
-#     with t_col1:
-#         if st.button("🌙 Dark",  use_container_width=True,
-#                      type="primary" if not is_light else "secondary"):
-#             st.session_state.theme      = 'dark'
-#             st.session_state.light_mode = False
-#             st.rerun()
-#     with t_col2:
-#         if st.button("☀️ Light", use_container_width=True,
-#                      type="primary" if is_light else "secondary"):
-#             st.session_state.theme      = 'light'
-#             st.session_state.light_mode = True
-#             st.rerun()
-
-#     st.markdown("---")
-
-#     # Use Streamlit native elements — no inline CSS vars needed
-#     st.caption("SYSTEMS")
-#     for nm, st_txt, col in [
-#         ("SBI Splice",     "● Online",                                    "#22c55e"),
-#         ("CLIP AI",        "● Online" if clip_ok else "● Offline",        "#22c55e" if clip_ok else "#ef4444"),
-#         ("DCT Frequency",  "● Online",                                    "#22c55e"),
-#         ("ELA Photoshop",  "● Online",                                    "#22c55e"),
-#         ("Caption AI Det", "● Online",                                    "#22c55e"),
-#     ]:
-#         c1, c2 = st.columns([3, 2])
-#         c1.caption(nm)
-#         c2.markdown(f'<span style="color:{col};font-size:0.72rem;font-weight:600">{st_txt}</span>', unsafe_allow_html=True)
-
-#     st.markdown("---")
-#     st.caption("MODEL METRICS")
-#     for lbl, val in [("Accuracy","93.1%"),("F1 Score","0.9285"),("AUC-ROC","0.9798"),("Best Val F1","0.9425")]:
-#         c1, c2 = st.columns([3, 2])
-#         c1.caption(lbl)
-#         c2.caption(f"**{val}**")
-
-#     st.markdown("---")
-#     st.caption("DETECTION SENSITIVITY")
-#     threshold = st.slider(
-#         "Fake score threshold",
-#         min_value=0.10, max_value=0.90, value=0.30, step=0.05,
-#         help="Images scoring above this are flagged as fake. Lower = more sensitive."
-#     )
-#     st.caption(f"Threshold: {threshold:.2f}  ·  {'Sensitive' if threshold < 0.35 else 'Balanced' if threshold < 0.60 else 'Conservative'}")
-
-#     st.markdown("---")
-#     st.caption("REGION HIGHLIGHT SENSITIVITY")
-#     region_thr = st.slider(
-#         "Heatmap threshold",
-#         min_value=0.20, max_value=0.80, value=0.45, step=0.05,
-#         help="Pixels above this heatmap value are highlighted as suspect."
-#     )
-#     st.caption(f"Region threshold: {region_thr:.2f}")
+# is_light = (st.session_state.get('theme', 'dark') == 'light')
 
 
 # # =============================================================
-# # HEADER
+# # HEADER + INLINE CONTROLS
 # # =============================================================
 # st.markdown(f"""
 # <div class="s-header">
@@ -893,12 +837,30 @@
 #         <div class="s-logo">🛡️</div>
 #         <div>
 #             <div class="s-title">SENTINEL</div>
-#             <div class="s-subtitle">MEDIA FORGERY DETECTION · v4.0</div>
+#             <div class="s-subtitle">MEDIA FORGERY DETECTION · v5.0</div>
 #         </div>
 #     </div>
 #     <div class="s-badge">{'● ALL SYSTEMS ONLINE' if clip_ok else '● CLIP OFFLINE'}</div>
 # </div>""", unsafe_allow_html=True)
 
+# # ── Inline controls strip ─────────────────────────────────────
+# ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
+# with ctrl_c1:
+#     threshold = st.slider("Detection Threshold", 0.10, 0.90, 0.30, 0.05,
+#                           help="Images scoring above this are flagged fake. Lower = more sensitive.")
+# with ctrl_c2:
+#     region_thr = st.slider("Region Highlight", 0.20, 0.80, 0.45, 0.05,
+#                            help="Heatmap pixels above this value are highlighted.")
+# with ctrl_c3:
+#     if st.button("🌙 Dark" if is_light else "☀️ Light", use_container_width=True):
+#         st.session_state.theme      = 'light' if not is_light else 'dark'
+#         st.session_state.light_mode = not is_light
+#         st.rerun()
+# with ctrl_c4:
+#     sens_label = "Sensitive" if threshold < 0.35 else "Balanced" if threshold < 0.60 else "Conservative"
+#     st.markdown(f'''<div style="font-size:0.7rem;color:var(--text-dim);padding-top:1.8rem;font-family:var(--mono)">{sens_label} · thr={threshold:.2f}</div>''', unsafe_allow_html=True)
+
+# st.markdown("---")
 
 # # =============================================================
 # # MAIN TWO-COLUMN LAYOUT
@@ -1277,7 +1239,7 @@ st.set_page_config(
     page_title="SENTINEL — Forgery Detection",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # =============================================================
@@ -1364,7 +1326,15 @@ def get_theme_css(light: bool) -> str:
 html, body, .stApp {{ background: {bg} !important; color: {text} !important; font-family: 'DM Sans', sans-serif !important; }}
 #MainMenu, footer {{ visibility: hidden; }}
 header {{ visibility: hidden; }}
-[data-testid="collapsedControl"] {{ visibility: visible !important; display: block !important; }}
+[data-testid="collapsedControl"],
+[data-testid="collapsedControl"] button,
+section[data-testid="stSidebarCollapsedControl"] {{
+    visibility: visible !important;
+    display: flex !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: 999999 !important;
+}}
 .block-container {{ padding: 1.5rem 2rem 3rem !important; max-width: 1400px !important; }}
 [data-testid="stSidebar"] {{ background: {sb_bg} !important; border-right: 1px solid {border} !important; }}
 [data-testid="stSidebar"] section > div {{ background: {sb_bg} !important; }}
@@ -1528,6 +1498,162 @@ def ela_analysis(image_pil):
     score    = min(1.0, high_pct * 3.0 + ela_std * 2.0)
     ela_gray = np.mean(ela_map, axis=2)
     return float(score), ela_gray, ela_vis
+
+
+def screenshot_detection(image_pil):
+    """
+    Detects screenshots and computer-generated images (not AI, not photos).
+    Signals: near-zero noise, dominant H/V edges, no chromatic aberration,
+    sparse color palette, no JPEG-style sensor grain.
+    Returns 0.0-1.0 where 1.0 = almost certainly a screenshot/UI image.
+    """
+    try:
+        img_np   = np.array(image_pil.convert('RGB')).astype(np.float32)
+        img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        h, w     = img_gray.shape
+
+        # Signal 1: Noise level — screenshots have near-zero sensor noise
+        blurred   = cv2.GaussianBlur(img_gray, (3, 3), 0)
+        mean_noise = float(np.mean(np.abs(img_gray.astype(np.float32) - blurred.astype(np.float32))))
+        noise_score = max(0.0, min(1.0, 1.0 - mean_noise / 0.8))
+
+        # Signal 2: Horizontal/vertical edge dominance — UI has straight grid lines
+        edges  = cv2.Canny(img_gray, 50, 150)
+        kh     = np.ones((1, 25), np.uint8)
+        kv     = np.ones((25, 1), np.uint8)
+        h_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kh)
+        v_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kv)
+        total_e = float(np.sum(edges > 0)) + 1e-8
+        hv_ratio = float(np.sum(h_lines > 0) + np.sum(v_lines > 0)) / total_e
+        hv_score = max(0.0, min(1.0, (hv_ratio - 0.10) / 0.50))
+
+        # Signal 3: No chromatic aberration — cameras have R/B channel edge offset,
+        # screenshots have perfect pixel-aligned channels
+        r_edges = cv2.Canny(img_np[:, :, 0].astype(np.uint8), 30, 100)
+        b_edges = cv2.Canny(img_np[:, :, 2].astype(np.uint8), 30, 100)
+        aberration = float(np.mean(np.logical_xor(r_edges > 0, b_edges > 0)))
+        aber_score = max(0.0, min(1.0, 1.0 - aberration / 0.02))
+
+        # Signal 4: Sparse color palette — UI uses brand colors not continuous gradients
+        # Count distinct color bins with >0.1% of pixels across R, G, B
+        hist_bins = []
+        for ch in range(3):
+            hist = cv2.calcHist([img_np[:, :, ch].astype(np.uint8)], [0], None, [256], [0, 256])
+            hist_bins.append(float(np.sum(hist.flatten() / hist.sum() > 0.001)))
+        mean_bins  = float(np.mean(hist_bins))
+        palette_score = max(0.0, min(1.0, 1.0 - (mean_bins - 20.0) / 130.0))
+
+        # Signal 5: Large uniform flat regions — UI backgrounds, panels
+        block_size = 16
+        flat_count = 0
+        total_b    = 0
+        for y in range(0, h - block_size, block_size):
+            for x in range(0, w - block_size, block_size):
+                block = img_gray[y:y+block_size, x:x+block_size].astype(np.float32)
+                if np.std(block) < 2.0:
+                    flat_count += 1
+                total_b += 1
+        flat_ratio = flat_count / (total_b + 1e-8)
+        flat_score = max(0.0, min(1.0, (flat_ratio - 0.15) / 0.50))
+
+        score = (0.30 * noise_score + 0.25 * hv_score + 0.20 * aber_score +
+                 0.15 * palette_score + 0.10 * flat_score)
+        return float(score), {
+            'noise': mean_noise, 'hv_ratio': hv_ratio,
+            'aberration': aberration, 'mean_bins': mean_bins, 'flat_ratio': flat_ratio
+        }
+    except Exception:
+        return 0.0, {}
+
+
+def photoshop_detection(image_pil):
+    """
+    Detects Photoshop edits, compositing and local manipulation.
+    Signals: ELA regional inconsistency (edited regions recompress differently),
+    copy-move detection (duplicated patches), and noise inconsistency
+    between image regions (spliced patches have different noise profiles).
+    Returns 0.0-1.0 where 1.0 = strong evidence of post-processing.
+    """
+    try:
+        img_rgb  = image_pil.convert('RGB')
+        img_np   = np.array(img_rgb).astype(np.float32)
+        img_gray = cv2.cvtColor(img_np.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        h, w     = img_gray.shape
+
+        # Signal 1: ELA regional inconsistency
+        # Authentic images: all regions recompress similarly → low variance
+        # Edited images: pasted regions have different compression history → high variance
+        buf = io.BytesIO()
+        img_rgb.save(buf, 'JPEG', quality=75)
+        buf.seek(0)
+        recomp   = np.array(Image.open(buf).convert('RGB')).astype(np.float32)
+        ela      = np.abs(img_np - recomp).mean(axis=2)
+        # Divide into 4x4 grid, measure ELA mean per region
+        rh, rw   = h // 4, w // 4
+        r_means  = []
+        for ry in range(4):
+            for rx in range(4):
+                r = ela[ry*rh:(ry+1)*rh, rx*rw:(rx+1)*rw]
+                r_means.append(float(np.mean(r)))
+        ela_range     = float(max(r_means) - min(r_means))
+        ela_reg_score = max(0.0, min(1.0, (ela_range - 3.0) / 15.0))
+
+        # Also check: multi-quality resave (quality 90 vs 75) — detects double-compression
+        buf2 = io.BytesIO()
+        img_rgb.save(buf2, 'JPEG', quality=90)
+        buf2.seek(0)
+        recomp2  = np.array(Image.open(buf2).convert('RGB')).astype(np.float32)
+        ela2     = np.abs(img_np - recomp2).mean(axis=2)
+        r2_means = []
+        for ry in range(4):
+            for rx in range(4):
+                r = ela2[ry*rh:(ry+1)*rh, rx*rw:(rx+1)*rw]
+                r2_means.append(float(np.mean(r)))
+        ela2_range     = float(max(r2_means) - min(r2_means))
+        ela2_reg_score = max(0.0, min(1.0, (ela2_range - 2.0) / 10.0))
+
+        # Signal 2: Noise inconsistency between regions
+        # Authentic: uniform noise level throughout. Spliced: pasted area has different noise.
+        blurred    = cv2.GaussianBlur(img_gray, (5, 5), 0)
+        noise_map  = np.abs(img_gray.astype(np.float32) - blurred.astype(np.float32))
+        rh2, rw2   = h // 8, w // 8
+        noise_levels = []
+        for ry in range(8):
+            for rx in range(8):
+                region = noise_map[ry*rh2:(ry+1)*rh2, rx*rw2:(rx+1)*rw2]
+                noise_levels.append(float(np.mean(region)))
+        noise_cv      = float(np.std(noise_levels) / (np.mean(noise_levels) + 1e-8))
+        noise_incon   = max(0.0, min(1.0, (noise_cv - 0.20) / 0.60))
+
+        # Signal 3: Copy-move detection (simplified block matching)
+        # Resize to manageable size, extract overlapping blocks, find near-duplicates
+        small  = cv2.resize(img_gray, (128, 128)).astype(np.float32)
+        bs     = 16
+        blocks = {}
+        copy_hits = 0
+        for y in range(0, 128 - bs, bs // 2):
+            for x in range(0, 128 - bs, bs // 2):
+                block  = small[y:y+bs, x:x+bs]
+                key    = tuple((block[::4, ::4] / 32).astype(int).flatten())
+                if key in blocks:
+                    dy = abs(y - blocks[key][0])
+                    dx = abs(x - blocks[key][1])
+                    if dy > bs or dx > bs:  # not just adjacent blocks
+                        copy_hits += 1
+                else:
+                    blocks[key] = (y, x)
+        total_blocks  = len(blocks)
+        copy_score    = max(0.0, min(1.0, copy_hits / (total_blocks * 0.05 + 1e-8)))
+
+        score = (0.40 * ela_reg_score + 0.20 * ela2_reg_score +
+                 0.25 * noise_incon   + 0.15 * copy_score)
+        return float(score), {
+            'ela_range': ela_range, 'ela2_range': ela2_range,
+            'noise_cv': noise_cv, 'copy_hits': copy_hits
+        }
+    except Exception:
+        return 0.0, {}
+
 
 
 @st.cache_resource
@@ -1953,7 +2079,7 @@ def analyze_caption_consistency(image_pil, caption, cm, cp, clip_ok):
         return None
 
 
-def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None):
+def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0):
     """
     Score fusion — designed around what each detector actually measures:
 
@@ -2001,8 +2127,14 @@ def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=No
     else:
         ai = 0.65 * sbi + 0.35 * dct_ai_c
 
-    # Edit/Photoshop track — SBI is the right anchor here
-    ps = 0.60 * sbi + 0.25 * ela_c + 0.15 * dct_ps_c
+    # Edit/Photoshop track — weighted blend of all edit signals
+    # ps_det (copy-move/ELA regional) is the most direct Photoshop signal
+    ps_det_c = min(ps_det, 0.90)
+    ps = 0.40 * sbi + 0.25 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
+
+    # Screenshot track — if screenshot score is high, override verdict
+    # Screenshots are NOT authentic photos but also NOT AI/Photoshop
+    # Handled separately in get_verdict
 
     # Caption mismatch boost
     if cap_analysis is not None:
@@ -2025,13 +2157,22 @@ def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=No
     return float(min(1.0, final)), float(ai), float(ps)
 
 
-def get_verdict(final, ai, ps, threshold):
+def get_verdict(final, ai, ps, threshold, ss=0.0, ps_det=0.0):
     """
     Verdict logic with dedicated AI image path.
 
     Key insight: for AI images, ai track will be high but ps track will be low
     (because SBI splice score is low). We must not require ps to agree.
     """
+    # Screenshot check — runs BEFORE threshold (screenshots aren't "authentic")
+    if ss > 0.65:
+        conf = f"{ss*100:.0f}%"
+        return "SCREENSHOT", f"Computer-generated image detected ({conf} confidence)", "🖥", "vc-amber", "verdict-manip"
+
+    # Photoshop check — strong edit signal even if final score is below threshold
+    if ps_det > 0.60 and ps > ai:
+        return "PHOTOSHOPPED", "Copy-move or compositing edits detected", "✗", "vc-red", "verdict-photoshop"
+
     # Always authentic below threshold
     if final < threshold:
         return "AUTHENTIC", "No manipulation detected", "✓", "vc-green", "verdict-authentic"
@@ -2072,69 +2213,13 @@ with st.spinner("Loading models..."):
 
 
 # =============================================================
-# SIDEBAR
+# CONTROLS (moved inline — sidebar toggle was unreliable)
 # =============================================================
-with st.sidebar:
-    # ── Theme: two plain st.buttons — always visible, no CSS deps ──
-    is_light = (st.session_state.get('theme', 'dark') == 'light')
-    st.markdown("**🎨 Theme**")
-    t_col1, t_col2 = st.columns(2)
-    with t_col1:
-        if st.button("🌙 Dark",  use_container_width=True,
-                     type="primary" if not is_light else "secondary"):
-            st.session_state.theme      = 'dark'
-            st.session_state.light_mode = False
-            st.rerun()
-    with t_col2:
-        if st.button("☀️ Light", use_container_width=True,
-                     type="primary" if is_light else "secondary"):
-            st.session_state.theme      = 'light'
-            st.session_state.light_mode = True
-            st.rerun()
-
-    st.markdown("---")
-
-    # Use Streamlit native elements — no inline CSS vars needed
-    st.caption("SYSTEMS")
-    for nm, st_txt, col in [
-        ("SBI Splice",     "● Online",                                    "#22c55e"),
-        ("CLIP AI",        "● Online" if clip_ok else "● Offline",        "#22c55e" if clip_ok else "#ef4444"),
-        ("DCT Frequency",  "● Online",                                    "#22c55e"),
-        ("ELA Photoshop",  "● Online",                                    "#22c55e"),
-        ("Caption AI Det", "● Online",                                    "#22c55e"),
-    ]:
-        c1, c2 = st.columns([3, 2])
-        c1.caption(nm)
-        c2.markdown(f'<span style="color:{col};font-size:0.72rem;font-weight:600">{st_txt}</span>', unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.caption("MODEL METRICS")
-    for lbl, val in [("Accuracy","93.1%"),("F1 Score","0.9285"),("AUC-ROC","0.9798"),("Best Val F1","0.9425")]:
-        c1, c2 = st.columns([3, 2])
-        c1.caption(lbl)
-        c2.caption(f"**{val}**")
-
-    st.markdown("---")
-    st.caption("DETECTION SENSITIVITY")
-    threshold = st.slider(
-        "Fake score threshold",
-        min_value=0.10, max_value=0.90, value=0.30, step=0.05,
-        help="Images scoring above this are flagged as fake. Lower = more sensitive."
-    )
-    st.caption(f"Threshold: {threshold:.2f}  ·  {'Sensitive' if threshold < 0.35 else 'Balanced' if threshold < 0.60 else 'Conservative'}")
-
-    st.markdown("---")
-    st.caption("REGION HIGHLIGHT SENSITIVITY")
-    region_thr = st.slider(
-        "Heatmap threshold",
-        min_value=0.20, max_value=0.80, value=0.45, step=0.05,
-        help="Pixels above this heatmap value are highlighted as suspect."
-    )
-    st.caption(f"Region threshold: {region_thr:.2f}")
+is_light = (st.session_state.get('theme', 'dark') == 'light')
 
 
 # =============================================================
-# HEADER
+# HEADER + INLINE CONTROLS
 # =============================================================
 st.markdown(f"""
 <div class="s-header">
@@ -2142,12 +2227,30 @@ st.markdown(f"""
         <div class="s-logo">🛡️</div>
         <div>
             <div class="s-title">SENTINEL</div>
-            <div class="s-subtitle">MEDIA FORGERY DETECTION · v4.0</div>
+            <div class="s-subtitle">MEDIA FORGERY DETECTION · v5.0</div>
         </div>
     </div>
     <div class="s-badge">{'● ALL SYSTEMS ONLINE' if clip_ok else '● CLIP OFFLINE'}</div>
 </div>""", unsafe_allow_html=True)
 
+# ── Inline controls strip ─────────────────────────────────────
+ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
+with ctrl_c1:
+    threshold = st.slider("Detection Threshold", 0.10, 0.90, 0.30, 0.05,
+                          help="Images scoring above this are flagged fake. Lower = more sensitive.")
+with ctrl_c2:
+    region_thr = st.slider("Region Highlight", 0.20, 0.80, 0.45, 0.05,
+                           help="Heatmap pixels above this value are highlighted.")
+with ctrl_c3:
+    if st.button("🌙 Dark" if is_light else "☀️ Light", use_container_width=True):
+        st.session_state.theme      = 'light' if not is_light else 'dark'
+        st.session_state.light_mode = not is_light
+        st.rerun()
+with ctrl_c4:
+    sens_label = "Sensitive" if threshold < 0.35 else "Balanced" if threshold < 0.60 else "Conservative"
+    st.markdown(f'''<div style="font-size:0.7rem;color:var(--text-dim);padding-top:1.8rem;font-family:var(--mono)">{sens_label} · thr={threshold:.2f}</div>''', unsafe_allow_html=True)
+
+st.markdown("---")
 
 # =============================================================
 # MAIN TWO-COLUMN LAYOUT
@@ -2200,12 +2303,16 @@ with col_r:
             dct_ai, dct_ps, dct_d = dct_frequency_analysis(image_pil)
         with st.spinner("L4 — ELA Photoshop..."):
             ela_score, ela_gray, ela_vis = ela_analysis(image_pil)
-        with st.spinner("L5 — Caption analysis..."):
+        with st.spinner("L5 — Screenshot detection..."):
+            ss_score, ss_details = screenshot_detection(image_pil)
+        with st.spinner("L6 — Photoshop/copy-move detection..."):
+            ps_det_score, ps_det_details = photoshop_detection(image_pil)
+        with st.spinner("L7 — Caption analysis..."):
             cap_cons   = analyze_caption_consistency(image_pil, caption, clip_model, clip_processor, clip_ok)
             cap_ai_res = detect_ai_caption(caption, clip_model, clip_processor, clip_ok)
         with st.spinner("Computing verdict..."):
-            final, ai_score, ps_score = combine_scores(sbi_score, clip_score, dct_ai, ela_score, dct_ps, clip_ok, cap_cons)
-            v_lbl, v_desc, v_icon, v_col, v_cls = get_verdict(final, ai_score, ps_score, threshold)
+            final, ai_score, ps_score = combine_scores(sbi_score, clip_score, dct_ai, ela_score, dct_ps, clip_ok, cap_cons, ps_det_score, ss_score)
+            v_lbl, v_desc, v_icon, v_col, v_cls = get_verdict(final, ai_score, ps_score, threshold, ss_score, ps_det_score)
 
         # Verdict
         st.markdown(f"""
