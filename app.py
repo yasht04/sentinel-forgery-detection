@@ -1,3 +1,5 @@
+import re
+
 import streamlit as st
 import torch
 import torch.nn.functional as F
@@ -78,7 +80,8 @@ def get_theme_css(light: bool) -> str:
 
     return f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+/* 1. Changed import to fetch Quicksand and DM Mono */
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Quicksand:wght@300;400;500;600;700&display=swap');
 
 /* CSS variables — all inline style="color:var(--x)" will work */
 :root {{
@@ -100,11 +103,13 @@ def get_theme_css(light: bool) -> str:
     --purple:    {purple};
     --purple-d:  {purple_d};
     --mono:      'DM Mono', monospace;
-    --sans:      'DM Sans', sans-serif;
+    /* 2. Updated the root sans variable */
+    --sans:      'Quicksand', sans-serif;
 }}
 
 * {{ box-sizing: border-box; }}
-html, body, .stApp {{ background: {bg} !important; color: {text} !important; font-family: 'DM Sans', sans-serif !important; }}
+/* 3. Applied Quicksand to the global app body */
+html, body, .stApp {{ background: {bg} !important; color: {text} !important; font-family: 'Quicksand', sans-serif !important; letter-spacing: 0.3px !important; }}
 #MainMenu, footer {{ visibility: hidden; }}
 header {{ visibility: hidden; }}
 [data-testid="collapsedControl"],
@@ -190,7 +195,8 @@ section[data-testid="stSidebarCollapsedControl"] {{
 [data-testid="stFileUploader"] {{ border:1.5px dashed {border2} !important; border-radius:10px !important; background:{bg2} !important; }}
 [data-testid="stFileUploader"]:hover {{ border-color:{accent} !important; }}
 
-.stButton > button {{ background:{accent} !important; border:none !important; color:#fff !important; font-family:'DM Sans',sans-serif !important; font-size:0.85rem !important; font-weight:600 !important; padding:0.65rem 1.5rem !important; border-radius:8px !important; }}
+/* 4. Applied Quicksand to buttons */
+.stButton > button {{ background:{accent} !important; border:none !important; color:#fff !important; font-family:'Quicksand',sans-serif !important; font-size:0.85rem !important; font-weight:600 !important; padding:0.65rem 1.5rem !important; border-radius:8px !important; letter-spacing: 0.5px !important; }}
 .stButton > button:hover {{ opacity:0.88 !important; }}
 .stButton > button:disabled {{ background:{border2} !important; opacity:0.5 !important; }}
 
@@ -850,64 +856,102 @@ def load_sbi_model():
     return model, tok, device
 
 
+# def run_sbi_inference(image_pil, caption, model, tok, device):
+#     """
+#     FIX 2 — Image preprocessing:
+#     - Resize PIL first, then convert to tensor (avoids cv2 BGR issue on some systems)
+#     - Keep uint8 numpy for display, use PIL path for transforms (matches training)
+#     - Clamp caption to non-empty string (empty string causes DistilBERT warning)
+#     """
+#     IMG = 224
+
+#     # Step 1: Resize using PIL (same as training augmentation pipeline)
+#     img_resized = image_pil.convert('RGB').resize((IMG, IMG), Image.BILINEAR)
+
+#     # Step 2: Keep uint8 numpy copy for display / region highlighting
+#     image_np = np.array(img_resized)  # HWC uint8 RGB
+
+#     # Step 3: Apply same normalization as training (ImageNet stats)
+#     tf    = T.Compose([
+#         T.ToTensor(),                                      # [0,255] HWC → [0,1] CHW
+#         T.Normalize([0.485, 0.456, 0.406],
+#                     [0.229, 0.224, 0.225])
+#     ])
+#     img_t = tf(img_resized).unsqueeze(0).to(device)        # (1,3,224,224)
+
+#     # Step 4: Normalize caption to match training dataset format (Flickr8k style)
+#     # Training captions were: lowercase, stripped, no excessive punctuation
+#     import re as _re
+#     if caption and caption.strip():
+#         cap_text = caption.strip().lower()
+#         cap_text = _re.sub(r"[^a-z0-9 .,!?'-]", " ", cap_text)  # remove special chars
+#         cap_text = _re.sub(r"\s+", " ", cap_text).strip()        # normalize whitespace
+#         if not cap_text:
+#             cap_text = "an image"
+#     else:
+#         cap_text = "an image"
+
+#     enc = tok(
+#         cap_text,
+#         padding='max_length',
+#         max_length=128,
+#         truncation=True,
+#         return_tensors='pt'
+#     )
+
+#     # Step 5: Forward pass
+#     with torch.no_grad():
+#         logit, heatmap = model(
+#             img_t,
+#             enc['input_ids'].to(device),
+#             enc['attention_mask'].to(device)
+#         )
+
+#     # Step 6: sigmoid on logit → probability in [0,1]
+#     # Model was trained with BCEWithLogitsLoss → logit > 0 = fake, < 0 = real
+#     prob     = torch.sigmoid(logit).item()
+#     heat_np  = heatmap.squeeze().cpu().numpy()   # (224,224) float32 in [0,1]
+
+#     return prob, heat_np, image_np
+
 def run_sbi_inference(image_pil, caption, model, tok, device):
-    """
-    FIX 2 — Image preprocessing:
-    - Resize PIL first, then convert to tensor (avoids cv2 BGR issue on some systems)
-    - Keep uint8 numpy for display, use PIL path for transforms (matches training)
-    - Clamp caption to non-empty string (empty string causes DistilBERT warning)
-    """
     IMG = 224
 
-    # Step 1: Resize using PIL (same as training augmentation pipeline)
+    # Step 1: Resize for the AI model
     img_resized = image_pil.convert('RGB').resize((IMG, IMG), Image.BILINEAR)
 
-    # Step 2: Keep uint8 numpy copy for display / region highlighting
-    image_np = np.array(img_resized)  # HWC uint8 RGB
+    # Step 2: Grab the FULL RESOLUTION image for the UI
+    full_res_np = np.array(image_pil.convert('RGB')) 
 
-    # Step 3: Apply same normalization as training (ImageNet stats)
+    # Step 3: Apply normalization
     tf    = T.Compose([
-        T.ToTensor(),                                      # [0,255] HWC → [0,1] CHW
+        T.ToTensor(),                                      
         T.Normalize([0.485, 0.456, 0.406],
                     [0.229, 0.224, 0.225])
     ])
-    img_t = tf(img_resized).unsqueeze(0).to(device)        # (1,3,224,224)
+    img_t = tf(img_resized).unsqueeze(0).to(device)        
 
-    # Step 4: Normalize caption to match training dataset format (Flickr8k style)
-    # Training captions were: lowercase, stripped, no excessive punctuation
+    # Step 4: Normalize caption
     import re as _re
     if caption and caption.strip():
         cap_text = caption.strip().lower()
-        cap_text = _re.sub(r"[^a-z0-9 .,!?'-]", " ", cap_text)  # remove special chars
-        cap_text = _re.sub(r"\s+", " ", cap_text).strip()        # normalize whitespace
-        if not cap_text:
-            cap_text = "an image"
+        cap_text = _re.sub(r"[^a-z0-9 .,!?'-]", " ", cap_text) 
+        cap_text = _re.sub(r"\s+", " ", cap_text).strip()       
+        if not cap_text: cap_text = "an image"
     else:
         cap_text = "an image"
 
-    enc = tok(
-        cap_text,
-        padding='max_length',
-        max_length=128,
-        truncation=True,
-        return_tensors='pt'
-    )
+    enc = tok(cap_text, padding='max_length', max_length=128, truncation=True, return_tensors='pt')
 
     # Step 5: Forward pass
     with torch.no_grad():
-        logit, heatmap = model(
-            img_t,
-            enc['input_ids'].to(device),
-            enc['attention_mask'].to(device)
-        )
+        logit, heatmap = model(img_t, enc['input_ids'].to(device), enc['attention_mask'].to(device))
 
-    # Step 6: sigmoid on logit → probability in [0,1]
-    # Model was trained with BCEWithLogitsLoss → logit > 0 = fake, < 0 = real
     prob     = torch.sigmoid(logit).item()
-    heat_np  = heatmap.squeeze().cpu().numpy()   # (224,224) float32 in [0,1]
+    heat_np  = heatmap.squeeze().cpu().numpy()  
 
-    return prob, heat_np, image_np
-
+    # RETURN THE FULL RES IMAGE
+    return prob, heat_np, full_res_np
 
 def segment_regions(heatmap_np, image_np, threshold=0.5):
     """
@@ -967,8 +1011,18 @@ def segment_regions(heatmap_np, image_np, threshold=0.5):
 
 
 def create_overlay(image_np, heatmap_np, alpha=0.45):
-    colored = colormaps['jet'](heatmap_np)[:, :, :3]
+    # 1. Get the dimensions of the full-res image
+    h, w = image_np.shape[:2]
+    
+    # 2. Stretch the 224x224 heatmap to perfectly match the full image
+    hm_resized = cv2.resize(heatmap_np, (w, h), interpolation=cv2.INTER_CUBIC)
+    
+    # 3. Apply the jet color map to the newly resized heatmap
+    colored = colormaps['jet'](hm_resized)[:, :, :3]
+    
+    # 4. Blend them smoothly together
     overlay = alpha * colored + (1-alpha) * (image_np / 255.0)
+    
     return np.clip(overlay * 255, 0, 255).astype(np.uint8)
 
 
@@ -1098,138 +1152,469 @@ def analyze_caption_consistency(image_pil, caption, cm, cp, clip_ok):
     except Exception:
         return None
 
+# def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0, hm_mean=0.0):
+#     dct_ai_c = min(dct_ai, 0.80)
+#     ela_c    = min(ela_ps, 0.75)
+#     dct_ps_c = min(dct_ps, 0.70)
 
-def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0):
-    """
-    Score fusion — designed around what each detector actually measures:
+#     is_global_ai = hm_mean > 0.75
+#     is_local_splice = 0.02 < hm_mean <= 0.75
 
-    SBI model  → trained on Flickr8k SPLICE forgeries only
-                 HIGH = copy-paste / region splice detected
-                 LOW for AI images is CORRECT and EXPECTED
+#     # ── STEP 1: The Hallucination Veto ──
+#     # Run this FIRST. If PyTorch is screaming fake but forensics are totally dead,
+#     # crush the PyTorch score immediately so it stops polluting the math.
+#     heuristics_dead = (ela_ps < 0.35) and (dct_ps < 0.30)
+#     if sbi > 0.70 and heuristics_dead:
+#         sbi *= 0.25               
+#         is_local_splice = False   
 
-    CLIP       → redesigned cosine similarity detector
-                 HIGH = visually matches "AI art / synthetic" concept
-                 This is the PRIMARY detector for AI-generated images
+#     # ── STEP 2: Real Photo Suppression (The 0.68 Boundary) ──
+#     # If the image has optical camera properties (bokeh, phone ratio) it suppresses
+#     # the AI flags. BUT if CLIP is highly confident (> 0.68), assume the AI is just
+#     # faking those camera properties and DO NOT suppress.
+#     if real_conf > 0.30 and clip_s < 0.68:
+#         clip_s = max(0.0, clip_s - (real_conf * 0.60))
+#         sbi    = max(0.0, sbi - (real_conf * 0.60)) 
+    
+#     # ── AI Track Calculation ──
+#     if clip_ok:
+#         if is_global_ai:
+#             ai = 0.60 * clip_s + 0.30 * sbi + 0.10 * dct_ai_c
+#         elif is_local_splice and sbi > 0.55:
+#             ai = 0.25 * clip_s + 0.55 * sbi + 0.20 * dct_ai_c
+#         elif sbi < 0.25:
+#             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
+#         else:
+#             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
+#     else:
+#         ai = 0.65 * sbi + 0.35 * dct_ai_c
 
-    DCT        → frequency domain heuristics (noisy, supporting signal only)
-    ELA        → JPEG compression artifact analysis (Photoshop detector)
+#     # ── Edit/Photoshop track ──
+#     ps_det_c = min(ps_det, 0.90)
+    
+#     # JPEG Artifact Suppression
+#     if sbi < 0.25:
+#         ela_c *= 0.40
+#         dct_ps_c *= 0.40
+#         ps_det_c *= 0.50
+    
+#     if is_global_ai:
+#         ps = 0.10 * sbi + 0.40 * ela_c + 0.20 * dct_ps_c + 0.30 * ps_det_c
+#     else:
+#         ps = 0.45 * sbi + 0.20 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
 
-    Two separate verdict tracks:
-    ┌─ AI track:    CLIP leads (65%), SBI supports (20%), DCT supports (15%)
-    └─ Edit track:  SBI leads (60%), ELA (25%), DCT block (15%)
+#     # ── Caption mismatch boost ──
+#     if cap_analysis is not None:
+#         ms = cap_analysis['match_score']
+#         if ms < 0.30:
+#             ai = min(1.0, ai + 0.10)
+#         elif ms < 0.45:
+#             ai = min(1.0, ai + 0.05)
 
-    Adaptive weighting: if CLIP is very high (> 0.70) and SBI is low (< 0.35),
-    this is a likely AI image NOT a splice — give CLIP even more weight.
-    """
+#     # ── Multi-signal agreement boost ──
+#     if clip_ok and clip_s > 0.65 and dct_ai > 0.55:
+#         ai = min(1.0, ai + 0.05)
+#     if sbi > 0.65 and ela_ps > 0.55:
+#         ps = min(1.0, ps + 0.05)
+
+#     # ── Metadata modulation ──
+#     if meta > 0.20:
+#         ai = min(1.0, ai + meta * 0.35)
+#     elif meta < -0.10:
+#         ai = max(0.0, ai + meta * 0.40) 
+
+#     # ── High-confidence single-signal override ──
+#     if clip_ok and clip_s > 0.80 and sbi < 0.30:
+#         ai = max(ai, 0.75)  
+#     if sbi > 0.80 and is_local_splice:
+#         ps = max(ps, 0.75) 
+
+#     # ── Per-type calibrated final blend ──
+#     gap = ai - ps
+#     if gap > 0.25:
+#         final = ai * 0.75 + ps * 0.25
+#     elif gap < -0.15:
+#         final = ps * 0.75 + ai * 0.25
+#     else:
+#         final = max(ai, ps) * 0.60 + min(ai, ps) * 0.40
+
+#     return float(min(1.0, final)), float(ai), float(ps)
+
+# second part that worked
+# def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0, hm_mean=0.0):
+    
+#     # ── THE L1 QUARANTINE (THE ONCE-AND-FOR-ALL FIX) ──
+#     # A true Photoshop splice (copy-paste) is localized. It rarely covers more 
+#     # than 30-40% of the image. If L1 (SBI) is screaming that it found a splice, 
+#     # but the heatmap is highlighting half the image, it is hallucinating on 
+#     # natural camera blur (bokeh). We muzzle it by forcing its score to near-zero.
+#     if sbi > 0.50 and hm_mean > 0.40:
+#         sbi = 0.05  
+        
+#     dct_ai_c = min(dct_ai, 0.80)
+#     ela_c    = min(ela_ps, 0.75)
+#     dct_ps_c = min(dct_ps, 0.70)
+
+#     is_global_ai = hm_mean > 0.75
+#     is_local_splice = 0.02 < hm_mean <= 0.40  # Tightened definition of a splice
+
+#     # ── STEP 1: The Hallucination Veto ──
+#     heuristics_dead = (ela_ps < 0.35) and (dct_ps < 0.30)
+#     if sbi > 0.70 and heuristics_dead:
+#         sbi *= 0.25               
+#         is_local_splice = False   
+
+#     # ── STEP 2: Real Photo Suppression ──
+#     if real_conf > 0.30 and clip_s < 0.68:
+#         clip_s = max(0.0, clip_s - (real_conf * 0.60))
+#         sbi    = max(0.0, sbi - (real_conf * 0.60)) 
+    
+#     # ── AI Track Calculation ──
+#     if clip_ok:
+#         if is_global_ai:
+#             ai = 0.60 * clip_s + 0.30 * sbi + 0.10 * dct_ai_c
+#         elif is_local_splice and sbi > 0.55:
+#             ai = 0.25 * clip_s + 0.55 * sbi + 0.20 * dct_ai_c
+#         elif sbi < 0.25:
+#             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
+#         else:
+#             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
+#     else:
+#         ai = 0.65 * sbi + 0.35 * dct_ai_c
+
+#     # ── Edit/Photoshop Track ──
+#     ps_det_c = min(ps_det, 0.90)
+    
+#     # JPEG Artifact Suppression
+#     if sbi < 0.25:
+#         ela_c *= 0.40
+#         dct_ps_c *= 0.40
+#         ps_det_c *= 0.50
+    
+#     if is_global_ai:
+#         ps = 0.10 * sbi + 0.40 * ela_c + 0.20 * dct_ps_c + 0.30 * ps_det_c
+#     else:
+#         ps = 0.45 * sbi + 0.20 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
+
+#     # ── Caption Mismatch Boost ──
+#     if cap_analysis is not None:
+#         ms = cap_analysis['match_score']
+#         if ms < 0.30:
+#             ai = min(1.0, ai + 0.10)
+#         elif ms < 0.45:
+#             ai = min(1.0, ai + 0.05)
+
+#     # ── Multi-Signal Agreement Boost ──
+#     if clip_ok and clip_s > 0.65 and dct_ai > 0.55:
+#         ai = min(1.0, ai + 0.05)
+#     if sbi > 0.65 and ela_ps > 0.55:
+#         ps = min(1.0, ps + 0.05)
+
+#     # ── Metadata Modulation ──
+#     if meta > 0.20:
+#         ai = min(1.0, ai + meta * 0.35)
+#     elif meta < -0.10:
+#         ai = max(0.0, ai + meta * 0.40) 
+
+#     # ── High-Confidence Single-Signal Override ──
+#     if clip_ok and clip_s > 0.80 and sbi < 0.30:
+#         ai = max(ai, 0.75)  
+#     if sbi > 0.80 and is_local_splice:
+#         ps = max(ps, 0.75) 
+
+#     # ── Per-Type Calibrated Final Blend ──
+#     gap = ai - ps
+#     if gap > 0.25:
+#         final = ai * 0.75 + ps * 0.25
+#     elif gap < -0.15:
+#         final = ps * 0.75 + ai * 0.25
+#     else:
+#         final = max(ai, ps) * 0.60 + min(ai, ps) * 0.40
+
+#     return float(min(1.0, final)), float(ai), float(ps)
+
+
+# main def that worked lastone
+# def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0, hm_mean=0.0):
+    
+#     # ── THE L1 QUARANTINE ──
+#     if sbi > 0.50 and hm_mean > 0.40:
+#         sbi = 0.05  
+        
+#     dct_ai_c = min(dct_ai, 0.80)
+#     ela_c    = min(ela_ps, 0.75)
+#     dct_ps_c = min(dct_ps, 0.70)
+
+#     is_global_ai = hm_mean > 0.75
+#     is_local_splice = 0.02 < hm_mean <= 0.40
+
+#     # ── STEP 1: The Hallucination Veto (FIXED) ──
+#     heuristics_dead = (ela_ps < 0.35) and (dct_ps < 0.30)
+#     # ONLY veto if the U-Net heatmap DOES NOT confirm a tight, localized splice
+#     if sbi > 0.70 and heuristics_dead and not is_local_splice:
+#         sbi *= 0.25               
+#         is_local_splice = False   
+
+#     # ── STEP 2: Real Photo Suppression ──
+#     if real_conf > 0.30 and clip_s < 0.68:
+#         clip_s = max(0.0, clip_s - (real_conf * 0.60))
+#         sbi    = max(0.0, sbi - (real_conf * 0.60)) 
+    
+#     # ── AI Track Calculation (FIXED ROUTING) ──
+#     if clip_ok:
+#         if is_global_ai:
+#             ai = 0.60 * clip_s + 0.30 * sbi + 0.10 * dct_ai_c
+#         elif is_local_splice:
+#             # STOP the PyTorch model from leaking into the AI score
+#             ai = 0.70 * clip_s + 0.05 * sbi + 0.25 * dct_ai_c
+#         elif sbi < 0.25:
+#             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
+#         else:
+#             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
+#     else:
+#         ai = 0.65 * sbi + 0.35 * dct_ai_c
+
+#     # ── Edit/Photoshop Track (FIXED ROUTING) ──
+#     ps_det_c = min(ps_det, 0.90)
+    
+#     if sbi < 0.25:
+#         ela_c *= 0.40
+#         dct_ps_c *= 0.40
+#         ps_det_c *= 0.50
+    
+#     if is_global_ai:
+#         ps = 0.10 * sbi + 0.40 * ela_c + 0.20 * dct_ps_c + 0.30 * ps_det_c
+#     elif is_local_splice:
+#         # FORCE the heavy PyTorch score into the Photoshop bucket
+#         ps = 0.65 * sbi + 0.15 * ela_c + 0.10 * dct_ps_c + 0.10 * ps_det_c
+#     else:
+#         ps = 0.45 * sbi + 0.20 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
+
+#     # ── Caption Mismatch Boost ──
+#     if cap_analysis is not None:
+#         ms = cap_analysis['match_score']
+#         if ms < 0.30:
+#             ai = min(1.0, ai + 0.10)
+#         elif ms < 0.45:
+#             ai = min(1.0, ai + 0.05)
+
+#     # ── Multi-Signal Agreement Boost ──
+#     if clip_ok and clip_s > 0.65 and dct_ai > 0.55:
+#         ai = min(1.0, ai + 0.05)
+#     if sbi > 0.65 and ela_ps > 0.55:
+#         ps = min(1.0, ps + 0.05)
+
+#     # ── Metadata Modulation ──
+#     if meta > 0.20:
+#         ai = min(1.0, ai + meta * 0.35)
+#     elif meta < -0.10:
+#         ai = max(0.0, ai + meta * 0.40) 
+
+#     # ── High-Confidence Single-Signal Override ──
+#     if clip_ok and clip_s > 0.80 and sbi < 0.30:
+#         ai = max(ai, 0.75)  
+#     if sbi > 0.80 and is_local_splice:
+#         ps = max(ps, 0.75) 
+
+#     # ── Per-Type Calibrated Final Blend ──
+#     gap = ai - ps
+#     if gap > 0.25:
+#         final = ai * 0.75 + ps * 0.25
+#     elif gap < -0.15:
+#         final = ps * 0.75 + ai * 0.25
+#     else:
+#         final = max(ai, ps) * 0.60 + min(ai, ps) * 0.40
+
+#     return float(min(1.0, final)), float(ai), float(ps)
+
+# worked for some but not for each
+# def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0, hm_mean=0.0):
+    
+#     # ── THE L1 QUARANTINE ──
+#     # Broadened slightly to 0.50 to ensure larger splices don't get quarantined
+#     if sbi > 0.50 and hm_mean > 0.60:
+#         sbi = 0.05  
+        
+#     dct_ai_c = min(dct_ai, 0.80)
+#     ela_c    = min(ela_ps, 0.75)
+#     dct_ps_c = min(dct_ps, 0.70)
+
+#     is_global_ai = hm_mean > 0.75
+#     # Broadened heatmap tolerance to ensure TIFF splices are recognized
+#     is_local_splice = 0.005 < hm_mean <= 0.60
+
+#     # ── STEP 1: The Hallucination Veto (TIFF FIX) ──
+#     heuristics_dead = (ela_ps < 0.35) and (dct_ps < 0.30)
+#     # If SBI is absolute (>0.90), trust it. TIFFs naturally have dead heuristics.
+#     if sbi > 0.70 and sbi < 0.85 and heuristics_dead and not is_local_splice:
+#         sbi *= 0.25               
+#         is_local_splice = False   
+
+#     # ── STEP 2: Real Photo Suppression (SPLICING FIX) ──
+#     if real_conf > 0.30 and clip_s < 0.68:
+#         clip_s = max(0.0, clip_s - (real_conf * 0.60))
+#         # DO NOT suppress the PyTorch model if it is highly confident in a splice!
+#         if sbi < 0.85:
+#             sbi = max(0.0, sbi - (real_conf * 0.60)) 
+    
+#     # ── AI Track Calculation ──
+#     if clip_ok:
+#         if is_global_ai:
+#             ai = 0.60 * clip_s + 0.30 * sbi + 0.10 * dct_ai_c
+#         elif is_local_splice:
+#             ai = 0.70 * clip_s + 0.05 * sbi + 0.25 * dct_ai_c
+#         elif sbi < 0.25:
+#             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
+#         else:
+#             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
+#     else:
+#         ai = 0.65 * sbi + 0.35 * dct_ai_c
+
+#     # ── Edit/Photoshop Track ──
+#     ps_det_c = min(ps_det, 0.90)
+    
+#     if sbi < 0.25:
+#         ela_c *= 0.40
+#         dct_ps_c *= 0.40
+#         ps_det_c *= 0.50
+    
+#     if is_global_ai:
+#         ps = 0.10 * sbi + 0.40 * ela_c + 0.20 * dct_ps_c + 0.30 * ps_det_c
+#     elif is_local_splice:
+#         ps = 0.65 * sbi + 0.15 * ela_c + 0.10 * dct_ps_c + 0.10 * ps_det_c
+#     else:
+#         ps = 0.45 * sbi + 0.20 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
+
+#     # ── Caption Mismatch Boost ──
+#     if cap_analysis is not None:
+#         ms = cap_analysis['match_score']
+#         if ms < 0.30:
+#             ai = min(1.0, ai + 0.10)
+#         elif ms < 0.45:
+#             ai = min(1.0, ai + 0.05)
+
+#     # ── Multi-Signal Agreement Boost ──
+#     if clip_ok and clip_s > 0.65 and dct_ai > 0.55:
+#         ai = min(1.0, ai + 0.05)
+#     if sbi > 0.65 and ela_ps > 0.55:
+#         ps = min(1.0, ps + 0.05)
+
+#     # ── Metadata Modulation ──
+#     if meta > 0.20:
+#         ai = min(1.0, ai + meta * 0.35)
+#     elif meta < -0.10:
+#         ai = max(0.0, ai + meta * 0.40) 
+
+#     # ── High-Confidence Single-Signal Override ──
+#     if clip_ok and clip_s > 0.80 and sbi < 0.30:
+#         ai = max(ai, 0.75)  
+#     if sbi > 0.80 and is_local_splice:
+#         ps = max(ps, 0.75) 
+
+#     # ── Per-Type Calibrated Final Blend ──
+#     gap = ai - ps
+#     if gap > 0.25:
+#         final = ai * 0.75 + ps * 0.25
+#     elif gap < -0.15:
+#         final = ps * 0.75 + ai * 0.25
+#     else:
+#         final = max(ai, ps) * 0.60 + min(ai, ps) * 0.40
+
+#     return float(min(1.0, final)), float(ai), float(ps)
+
+def combine_scores(sbi, clip_s, dct_ai, ela_ps, dct_ps, clip_ok, cap_analysis=None, ps_det=0.0, ss_det=0.0, meta=0.0, real_conf=0.0, hm_mean=0.0):
+
+    if sbi > 0.50 and hm_mean > 0.60:
+        sbi = 0.05  
+        
     dct_ai_c = min(dct_ai, 0.80)
     ela_c    = min(ela_ps, 0.75)
     dct_ps_c = min(dct_ps, 0.70)
 
-    # ── Real photo suppression ───────────────────────────────────────────────
-    # If strong real photo signals fire (phone ratio, chromatic aberration, DOF),
-    # suppress the clip_s signal before dominance check.
-    # This prevents JPEG-compressed real photos from being misidentified as AI.
-    if real_conf > 0.40:
-        suppression = real_conf * 0.50   # up to 50% at real_conf=1.0
-        clip_s = max(0.0, clip_s - suppression)
+    is_global_ai = hm_mean > 0.75
 
+    is_local_splice = 0.005 < hm_mean <= 0.60
+
+    # ── STEP 1: The Hallucination Veto (TIFF ARMOR) ──
+    heuristics_dead = (ela_ps < 0.35) and (dct_ps < 0.30)
+    # If SBI is > 0.85, it bypasses the veto entirely, protecting it from 
+    # being crushed by dead TIFF heuristics, regardless of how bad the heatmap looks.
+    if sbi > 0.70 and sbi < 0.85 and heuristics_dead and not is_local_splice:
+        sbi *= 0.25               
+        is_local_splice = False   
+
+    # ── STEP 2: Real Photo Suppression ──
+    if real_conf > 0.30 and clip_s < 0.68:
+        clip_s = max(0.0, clip_s - (real_conf * 0.60))
+        # Protect highly confident splice detections from being suppressed
+        if sbi < 0.85:
+            sbi = max(0.0, sbi - (real_conf * 0.60)) 
+    
+    # ── AI Track Calculation ──
     if clip_ok:
-        clip_dominant = clip_s > 0.48 and sbi < 0.45
-        sbi_dominant  = sbi > 0.55 and clip_s < 0.45
-
-        if clip_dominant:
-            # AI image pattern: CLIP+visual leads
-            ai = 0.80 * clip_s + 0.05 * sbi + 0.15 * dct_ai_c
-        elif sbi_dominant:
-            # Splice/copy-paste pattern: SBI leads
-            ai = 0.25 * clip_s + 0.55 * sbi + 0.20 * dct_ai_c
+        if is_global_ai:
+            ai = 0.60 * clip_s + 0.30 * sbi + 0.10 * dct_ai_c
+        elif is_local_splice:
+            ai = 0.70 * clip_s + 0.05 * sbi + 0.25 * dct_ai_c
         elif sbi < 0.25:
-            # SBI sees nothing suspicious — likely AI or real (not a splice)
-            # Let CLIP lead with higher weight
             ai = 0.65 * clip_s + 0.15 * sbi + 0.20 * dct_ai_c
         else:
-            # General case
             ai = 0.50 * clip_s + 0.30 * sbi + 0.20 * dct_ai_c
     else:
         ai = 0.65 * sbi + 0.35 * dct_ai_c
 
-    # Edit/Photoshop track — weighted blend of all edit signals
-    # ps_det (copy-move/ELA regional) is the most direct Photoshop signal
+    # ── Edit/Photoshop Track ──
     ps_det_c = min(ps_det, 0.90)
-    ps = 0.40 * sbi + 0.25 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
+    
+    if sbi < 0.25:
+        ela_c *= 0.40
+        dct_ps_c *= 0.40
+        ps_det_c *= 0.50
+    
+    if is_global_ai:
+        ps = 0.10 * sbi + 0.40 * ela_c + 0.20 * dct_ps_c + 0.30 * ps_det_c
+    elif is_local_splice:
+        ps = 0.65 * sbi + 0.15 * ela_c + 0.10 * dct_ps_c + 0.10 * ps_det_c
+    else:
+        ps = 0.45 * sbi + 0.20 * ela_c + 0.15 * dct_ps_c + 0.20 * ps_det_c
 
-    # Screenshot track — if screenshot score is high, override verdict
-    # Screenshots are NOT authentic photos but also NOT AI/Photoshop
-    # Handled separately in get_verdict
-
-    # Caption mismatch boost
-    if cap_analysis is not None:
-        ms = cap_analysis['match_score']
-        if ms < 0.30:
-            ai = min(1.0, ai + 0.10)
-        elif ms < 0.45:
-            ai = min(1.0, ai + 0.05)
-
-    # Multi-signal agreement boost
+    # ── Multi-Signal Agreement Boost ──
     if clip_ok and clip_s > 0.65 and dct_ai > 0.55:
         ai = min(1.0, ai + 0.05)
     if sbi > 0.65 and ela_ps > 0.55:
         ps = min(1.0, ps + 0.05)
 
-    # ── Metadata modulation ──────────────────────────────────────────────────
-    # meta is in [-0.40, 0.80]:
-    #   positive (no exif, square AI size) → boost ai score
-    #   negative (camera exif, camera ratio) → suppress ai score (real photo)
+    # ── Metadata Modulation ──
     if meta > 0.20:
-        # Strong AI metadata signal — boost
         ai = min(1.0, ai + meta * 0.35)
     elif meta < -0.10:
-        # Strong real camera signal — suppress AI track
-        ai = max(0.0, ai + meta * 0.40)   # meta is negative, so this reduces ai
+        ai = max(0.0, ai + meta * 0.40) 
 
-    # ── High-confidence single-signal override ────────────────────────────────
-    # If one signal is extremely high, don't let weak signals drag it down
+    # ── High-Confidence Single-Signal Override ──
     if clip_ok and clip_s > 0.80 and sbi < 0.30:
-        ai = max(ai, 0.75)   # very confident AI image — floor ai score
-    if sbi > 0.80:
-        ps = max(ps, 0.75)   # very confident splice — floor ps score
+        ai = max(ai, 0.75)  
+    if sbi > 0.80 and is_local_splice:
+        ps = max(ps, 0.75) 
 
-    # ── Per-type calibrated final blend ──────────────────────────────────────
-    # AI image pattern: ai >> ps
-    # Photoshop pattern: ps >> ai (or close)
+    # ── Per-Type Calibrated Final Blend ──
     gap = ai - ps
     if gap > 0.25:
-        # Clearly AI track dominant — weight it more
         final = ai * 0.75 + ps * 0.25
     elif gap < -0.15:
-        # Clearly PS track dominant
         final = ps * 0.75 + ai * 0.25
     else:
-        # Ambiguous — balanced blend
         final = max(ai, ps) * 0.60 + min(ai, ps) * 0.40
 
     return float(min(1.0, final)), float(ai), float(ps)
 
-
 def get_verdict(final, ai, ps, threshold, ss=0.0, ps_det=0.0):
-    """
-    Verdict logic with dedicated AI image path.
-
-    Key insight: for AI images, ai track will be high but ps track will be low
-    (because SBI splice score is low). We must not require ps to agree.
-    """
-    # ── Screenshot — runs before everything else ──────────────────────────────
-    if ss > 0.65:
+    # ── Screenshot — runs before everything else ──
+    if ss > 0.25:
         return "SCREENSHOT", f"Computer/UI-generated image ({ss*100:.0f}% confidence)", "🖥", "vc-amber", "verdict-manip"
 
-    # ── Photoshop — high ps_det with ps track dominant ─────────────────────
-    if ps_det > 0.55 and ps > ai:
-        return "PHOTOSHOPPED", "Copy-move or compositing edits detected", "✗", "vc-red", "verdict-photoshop"
-
-    # ── Authentic — per-type calibrated threshold ──────────────────────────
-    # AI images: lower threshold (0.28) because visual+metadata are reliable
-    # General: use user-set threshold
-    ai_threshold = min(threshold, 0.28)  # AI detection is sensitive
+    # ── THE FIX: Trust the User's Threshold Slider! ──
+    # We removed the min(threshold, 0.28) hardcap. 
+    ai_threshold = threshold
     ps_threshold = threshold
 
     if ai > ps:
@@ -1239,21 +1624,24 @@ def get_verdict(final, ai, ps, threshold, ss=0.0, ps_det=0.0):
         if final < ps_threshold:
             return "AUTHENTIC", "No manipulation detected", "✓", "vc-green", "verdict-authentic"
 
-    # ── AI verdict ─────────────────────────────────────────────────────────
+    # ── Photoshop — high ps_det with ps track dominant ──
+    if ps_det > 0.55 and ps > ai:
+        return "PHOTOSHOPPED", "Copy-move or compositing edits detected", "✗", "vc-red", "verdict-photoshop"
+
+    # ── AI verdict ──
     if ai > ps:
         if ai > 0.72:
             return "AI GENERATED",  "Strong AI/GAN/diffusion signal",   "⚠", "vc-purple", "verdict-ai"
         if ai > 0.48:
             return "LIKELY AI",     "Probable AI-generated image",       "◐", "vc-purple", "verdict-ai"
 
-    # ── Photoshop/splice verdict ────────────────────────────────────────────
+    # ── Photoshop/splice verdict ──
     if ps > ai:
         if ps > 0.68:
             return "PHOTOSHOPPED",  "Splice/Photoshop manipulation detected", "✗", "vc-red",   "verdict-photoshop"
         return     "MANIPULATED",   "Image shows signs of editing",           "⚠", "vc-amber", "verdict-manip"
 
     return "MANIPULATED", "Manipulation detected", "⚠", "vc-amber", "verdict-manip"
-
 
 def lstyle(s, kind='normal'):
     if kind == 'purple':
@@ -1288,28 +1676,49 @@ st.markdown(f"""
         <div class="s-logo">🛡️</div>
         <div>
             <div class="s-title">SENTINEL</div>
-            <div class="s-subtitle">MEDIA FORGERY DETECTION · v5.0</div>
+            <div class="s-subtitle">MEDIA FORGERY DETECTION</div>
         </div>
     </div>
     <div class="s-badge">{'● ALL SYSTEMS ONLINE' if clip_ok else '● CLIP OFFLINE'}</div>
 </div>""", unsafe_allow_html=True)
 
 # ── Inline controls strip ─────────────────────────────────────
-ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
-with ctrl_c1:
-    threshold = st.slider("Detection Threshold", 0.10, 0.90, 0.30, 0.05,
-                          help="Images scoring above this are flagged fake. Lower = more sensitive.")
-with ctrl_c2:
-    region_thr = st.slider("Region Highlight", 0.20, 0.80, 0.45, 0.05,
-                           help="Heatmap pixels above this value are highlighted.")
-with ctrl_c3:
-    if st.button("🌙 Dark" if is_light else "☀️ Light", use_container_width=True):
-        st.session_state.theme      = 'light' if not is_light else 'dark'
-        st.session_state.light_mode = not is_light
-        st.rerun()
-with ctrl_c4:
-    sens_label = "Sensitive" if threshold < 0.35 else "Balanced" if threshold < 0.60 else "Conservative"
-    st.markdown(f'''<div style="font-size:0.7rem;color:var(--text-dim);padding-top:1.8rem;font-family:var(--mono)">{sens_label} · thr={threshold:.2f}</div>''', unsafe_allow_html=True)
+# ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
+# with ctrl_c1:
+#     threshold = st.slider("Detection Threshold", 0.10, 0.90, 0.30, 0.05,
+#                           help="Images scoring above this are flagged fake. Lower = more sensitive.")
+# with ctrl_c2:
+#     region_thr = st.slider("Region Highlight", 0.20, 0.80, 0.45, 0.05,
+#                            help="Heatmap pixels above this value are highlighted.")
+# with ctrl_c3:
+#     if st.button("🌙 Dark" if is_light else "☀️ Light", use_container_width=True):
+#         st.session_state.theme      = 'light' if not is_light else 'dark'
+#         st.session_state.light_mode = not is_light
+#         st.rerun()
+# with ctrl_c4:
+#     pass
+#     # sens_label = "Sensitive" if threshold < 0.35 else "Balanced" if threshold < 0.60 else "Conservative"
+#     # st.markdown(f'''<div style="font-size:0.7rem;color:var(--text-dim);padding-top:1.8rem;font-family:var(--mono)">{sens_label} · thr={threshold:.2f}</div>''', unsafe_allow_html=True)
+
+# st.markdown("---")
+# Wrap in a clean bordered card
+with st.container(border=True):
+    # vertical_alignment="bottom" ensures the button aligns with the slider tracks (Requires Streamlit 1.36+)
+    ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([5, 5, 2], vertical_alignment="bottom")
+    
+    with ctrl_c1:
+        threshold = st.slider("🎯 Detection Threshold", 0.10, 0.90, 0.30, 0.05,
+                              help="Images scoring above this are flagged fake. Lower = more sensitive.")
+    with ctrl_c2:
+        region_thr = st.slider("🔍 Region Highlight", 0.20, 0.80, 0.45, 0.05,
+                               help="Heatmap pixels above this value are highlighted.")
+    with ctrl_c3:
+        # type="secondary" makes the button a sleek outline instead of a distracting solid color block
+        btn_label = "🌙 Dark Mode" if is_light else "☀️ Light Mode"
+        if st.button(btn_label, use_container_width=True, type="secondary"):
+            st.session_state.theme      = 'light' if not is_light else 'dark'
+            st.session_state.light_mode = not is_light
+            st.rerun()
 
 st.markdown("---")
 
@@ -1320,7 +1729,7 @@ col_l, col_r = st.columns([1, 1], gap="large")
 
 with col_l:
     st.markdown('<div class="sec-label">Evidence Input</div>', unsafe_allow_html=True)
-    uploaded = st.file_uploader("Image", type=["jpg","jpeg","png","webp"], label_visibility="collapsed")
+    uploaded = st.file_uploader("Image", type=["jpg","jpeg","png","webp", 'tiff', 'tif'], label_visibility="collapsed")
     st.markdown('<div style="font-family:var(--mono);font-size:0.58rem;color:var(--text-dim);margin-top:-0.3rem;margin-bottom:0.75rem">JPG · PNG · WEBP</div>', unsafe_allow_html=True)
     caption  = st.text_area("Caption", placeholder="Describe the image (optional)...", height=75, label_visibility="collapsed")
     st.markdown('<div style="font-family:var(--mono);font-size:0.58rem;color:var(--text-dim);margin-top:-0.3rem;margin-bottom:0.8rem">Optional — enables caption + AI caption analysis</div>', unsafe_allow_html=True)
@@ -1343,8 +1752,13 @@ with col_r:
     if uploaded and run_btn:
         image_pil = Image.open(uploaded)
 
+        # with st.spinner("L1 — SBI splice detection..."):
+        #     sbi_score, heatmap_np, image_np = run_sbi_inference(image_pil, caption, sbi_model, tokenizer, device)
         with st.spinner("L1 — SBI splice detection..."):
-            sbi_score, heatmap_np, image_np = run_sbi_inference(image_pil, caption, sbi_model, tokenizer, device)
+            # Replace 'caption' with a blank string or a generic, hardcoded prompt
+            # so the user's text can never influence the pixel math.
+            safe_sbi_prompt = ""  # (If your specific model requires text, change this to "image" or "manipulated region")
+            sbi_score, heatmap_np, image_np = run_sbi_inference(image_pil, safe_sbi_prompt, sbi_model, tokenizer, device)
         with st.spinner("L2 — Visual AI detection..."):
             visual_score  = visual_ai_detection(image_pil)
             real_conf     = real_photo_confidence(image_pil)
@@ -1375,7 +1789,8 @@ with col_r:
             cap_cons   = analyze_caption_consistency(image_pil, caption, clip_model, clip_processor, clip_ok)
             cap_ai_res = detect_ai_caption(caption, clip_model, clip_processor, clip_ok)
         with st.spinner("Computing verdict..."):
-            final, ai_score, ps_score = combine_scores(sbi_score, clip_score, dct_ai, ela_score, dct_ps, clip_ok, cap_cons, ps_det_score, ss_score, meta_score, real_conf)
+            hm_mean = float(heatmap_np.mean()) 
+            final, ai_score, ps_score = combine_scores(sbi_score, clip_score, dct_ai, ela_score, dct_ps, clip_ok, cap_cons, ps_det_score, ss_score, meta_score, real_conf, hm_mean)
             v_lbl, v_desc, v_icon, v_col, v_cls = get_verdict(final, ai_score, ps_score, threshold, ss_score, ps_det_score)
 
         # Verdict
@@ -1518,6 +1933,18 @@ if uploaded and run_btn:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── CAPTION ANALYSIS ──────────────────────────────────────
+    if caption.strip():
+        if cap_cons:
+            ms = cap_cons.get('match_score', 1.0)
+            if ms < 0.30:
+                st.error("🚨 **MISATTRIBUTION DETECTED:** The visual contents of this image do not match the caption.")
+            elif ms < 0.50:
+                st.warning("⚠️ **POOR CAPTION MATCH:** The caption only loosely matches the image contents. Proceed with caution.")
+
+        if cap_ai_res and cap_ai_res.get('label') == 'AI-GENERATED':
+            st.info("🤖 **BOT ACTIVITY RISK:** Linguistic analysis indicates the caption was likely generated by an AI language model.")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="sec-label">Caption Analysis</div>', unsafe_allow_html=True)
     cc1, cc2 = st.columns([1, 1], gap="large")
 
@@ -1660,7 +2087,7 @@ st.markdown("""
 <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);
             font-family:var(--mono);font-size:0.57rem;color:var(--text-dim);
             display:flex;justify-content:space-between">
-    <span>SENTINEL v4.0</span>
+    <span>SENTINEL</span>
     <span>EfficientNet-B4 · DistilBERT · CLIP ViT-B/32 · ELA · DCT · 5-Layer Pipeline</span>
     <span>F1: 0.9285 · AUC-ROC: 0.9798</span>
 </div>""", unsafe_allow_html=True)
