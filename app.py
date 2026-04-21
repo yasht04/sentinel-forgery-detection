@@ -1667,58 +1667,32 @@ with st.spinner("Loading models..."):
 is_light = (st.session_state.get('theme', 'dark') == 'light')
 
 
-# =============================================================
-# HEADER + INLINE CONTROLS
-# =============================================================
-st.markdown(f"""
-<div class="s-header">
-    <div class="s-logo-row">
-        <div class="s-logo">🛡️</div>
-        <div>
-            <div class="s-title">SENTINEL</div>
-            <div class="s-subtitle">MEDIA FORGERY DETECTION</div>
+threshold = 0.30
+region_thr = 0.45
+
+# 2. Put the Header and the Theme Button in the same horizontal row
+header_col, btn_col = st.columns([8.5, 1.5], vertical_alignment="center")
+
+with header_col:
+    # We removed the bottom border from the CSS class here so it blends perfectly
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0;">
+        <div class="s-logo-row">
+            <div class="s-logo">🛡️</div>
+            <div>
+                <div class="s-title">SENTINEL</div>
+                <div class="s-subtitle">MEDIA FORGERY DETECTION</div>
+            </div>
         </div>
-    </div>
-    <div class="s-badge">{'● ALL SYSTEMS ONLINE' if clip_ok else '● CLIP OFFLINE'}</div>
-</div>""", unsafe_allow_html=True)
+        <div class="s-badge">{'● ALL SYSTEMS ONLINE' if clip_ok else '● CLIP OFFLINE'}</div>
+    </div>""", unsafe_allow_html=True)
 
-# ── Inline controls strip ─────────────────────────────────────
-# ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
-# with ctrl_c1:
-#     threshold = st.slider("Detection Threshold", 0.10, 0.90, 0.30, 0.05,
-#                           help="Images scoring above this are flagged fake. Lower = more sensitive.")
-# with ctrl_c2:
-#     region_thr = st.slider("Region Highlight", 0.20, 0.80, 0.45, 0.05,
-#                            help="Heatmap pixels above this value are highlighted.")
-# with ctrl_c3:
-#     if st.button("🌙 Dark" if is_light else "☀️ Light", use_container_width=True):
-#         st.session_state.theme      = 'light' if not is_light else 'dark'
-#         st.session_state.light_mode = not is_light
-#         st.rerun()
-# with ctrl_c4:
-#     pass
-#     # sens_label = "Sensitive" if threshold < 0.35 else "Balanced" if threshold < 0.60 else "Conservative"
-#     # st.markdown(f'''<div style="font-size:0.7rem;color:var(--text-dim);padding-top:1.8rem;font-family:var(--mono)">{sens_label} · thr={threshold:.2f}</div>''', unsafe_allow_html=True)
-
-# st.markdown("---")
-# Wrap in a clean bordered card
-with st.container(border=True):
-    # vertical_alignment="bottom" ensures the button aligns with the slider tracks (Requires Streamlit 1.36+)
-    ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([5, 5, 2], vertical_alignment="bottom")
-    
-    with ctrl_c1:
-        threshold = st.slider("🎯 Detection Threshold", 0.10, 0.90, 0.30, 0.05,
-                              help="Images scoring above this are flagged fake. Lower = more sensitive.")
-    with ctrl_c2:
-        region_thr = st.slider("🔍 Region Highlight", 0.20, 0.80, 0.45, 0.05,
-                               help="Heatmap pixels above this value are highlighted.")
-    with ctrl_c3:
-        # type="secondary" makes the button a sleek outline instead of a distracting solid color block
-        btn_label = "🌙 Dark Mode" if is_light else "☀️ Light Mode"
-        if st.button(btn_label, use_container_width=True, type="secondary"):
-            st.session_state.theme      = 'light' if not is_light else 'dark'
-            st.session_state.light_mode = not is_light
-            st.rerun()
+with btn_col:
+    btn_label = "🌙 Dark" if is_light else "☀️ Light"
+    if st.button(btn_label, use_container_width=True, type="secondary"):
+        st.session_state.theme      = 'light' if not is_light else 'dark'
+        st.session_state.light_mode = not is_light
+        st.rerun()
 
 st.markdown("---")
 
